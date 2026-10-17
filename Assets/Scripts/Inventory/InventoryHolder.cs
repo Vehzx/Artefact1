@@ -12,6 +12,23 @@ public class InventoryHolder : MonoBehaviour
     // save to persistent data folder
     [SerializeField] private string saveFileName = "inventory.json";
 
+    [Header("Dropping")]
+
+    // how far in front of the player dropped items spawn
+    [SerializeField, Min(0.5f)] private float dropDistance = 1.2f;
+
+    // spawn height (roughly chest height)
+    [SerializeField, Min(0f)] private float dropHeight = 1f;
+
+    // closest an item can spawn when a wall is in the way, any closer and drop is refused
+    [SerializeField, Min(0f)] private float minDropDistance = 0.7f;
+
+    // gap kept between the item and a wall in front
+    [SerializeField, Min(0f)] private float wallPadding = 0.25f;
+
+    // what counts as a wall for the drop check
+    [SerializeField] private LayerMask dropBlockingLayers = ~0;
+
     private Inventory inventory;
 
     // do not create in awake, this avoids the UI finding null inventory sometimes
@@ -27,6 +44,63 @@ public class InventoryHolder : MonoBehaviour
 
     // full save path, path combine to add each folder seperator
     private string SavePath => Path.Combine(Application.persistentDataPath, saveFileName);
+
+    // drop the whole stack in a slot into the world in front of the player
+    // returns false if nothing was dropped
+    public bool DropSlot(int index)
+    {
+        ItemStack stack = Inventory.GetSlot(index);
+        if (stack == null)
+            return false;
+
+        ItemDefinition item = stack.Item;
+
+        if (item.PickupPrefab == null)
+        {
+            Debug.LogWarning($"'{item.name}' has no pickup prefab, cannot drop it", item);
+            return false;
+        }
+
+        if (!TryGetDropPosition(out Vector3 position))
+        {
+            Debug.Log("No room to drop item here");
+            return false;
+        }
+
+        GameObject spawned = Instantiate(item.PickupPrefab, position, Quaternion.identity);
+
+        if (!spawned.TryGetComponent(out ItemPickup pickup))
+        {
+            Debug.LogError($"Pickup prefab for '{item.name}' has no ItemPickup component", item.PickupPrefab);
+            Destroy(spawned);
+            return false;
+        }
+
+        // remove from inventory only once the pickup definitely exists, so items are never lost
+        int removed = Inventory.RemoveFromSlot(index, stack.Quantity);
+        pickup.Initialise(item, removed);
+        return true;
+    }
+
+    /*
+    DOCS: https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Physics.Raycast.html
+    */
+
+    // spawn point in front of the player, pulled back if a wall is in the way
+    private bool TryGetDropPosition(out Vector3 position)
+    {
+        Vector3 origin = transform.position + Vector3.up * dropHeight;
+        Vector3 forward = transform.forward;
+        float distance = dropDistance;
+
+        // start ray inside the character controller so it will not hit the player
+        // ignore triggers so other pickups do not block the drop
+        if (Physics.Raycast(origin, forward, out RaycastHit hit, dropDistance, dropBlockingLayers, QueryTriggerInteraction.Ignore))
+            distance = hit.distance - wallPadding;
+
+        position = origin + forward * distance;
+        return distance >= minDropDistance;
+    }
 
     public bool Save()
     {
@@ -87,4 +161,15 @@ public class InventoryHolder : MonoBehaviour
             return false;
         }
     }
+
+#if UNITY_EDITOR
+    // shows where items will drop when the player is selected
+    private void OnDrawGizmosSelected()
+    {
+        Vector3 origin = transform.position + Vector3.up * dropHeight;
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawLine(origin, origin + transform.forward * dropDistance);
+        Gizmos.DrawWireSphere(origin + transform.forward * dropDistance, 0.15f);
+    }
+#endif
 }

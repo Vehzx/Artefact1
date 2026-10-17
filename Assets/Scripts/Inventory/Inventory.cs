@@ -83,6 +83,45 @@ public class Inventory
         return removed;
     }
 
+    public void MoveOrSwap(int from, int to)
+    {
+        ItemStack source = GetSlot(from);
+        ItemStack target = GetSlot(to);
+
+        // since world isnt frozen while inventory open, the source
+        // could have been emptied mid drag, just ignore it
+        // (FIXES source.Quantity throwing null reference)
+        if (from == to || source == null)
+            return;
+
+        // the target slot is empty, move items and empty the source slot
+        if (target == null)
+        {
+            slots[to] = source;
+            slots[from] = null;
+        }
+
+        // if slot has same item and its stackable, merge until max stack, leave remainder on source slot
+        else if (target.Item == source.Item && !target.IsFull)
+        {
+            int moved = Math.Min(source.Quantity, target.SpaceRemaining);
+            target.Quantity += moved;
+            source.Quantity -= moved;
+
+            if (source.Quantity == 0)
+                slots[from] = null;
+        }
+
+        // if a different item, or a full stack of the same item, simply swap the two slots
+        else
+        {
+            slots[to] = source;
+            slots[from] = target;
+        }
+
+        Changed?.Invoke();
+    }
+
     // total number of a given item across all slots
     public int CountOf(ItemDefinition item)
     {

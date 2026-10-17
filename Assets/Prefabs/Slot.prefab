@@ -228,6 +228,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::SlotUI
   icon: {fileID: 8534843645560465933}
   quantityText: {fileID: 1908681028746349312}
+  dragSourceAlpha: 0.35
 --- !u!1 &7721388240676446598
 GameObject:
   m_ObjectHideFlags: 0

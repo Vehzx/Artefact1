@@ -12,6 +12,13 @@ public class ItemPickup : MonoBehaviour
         GetComponent<Collider>().isTrigger = true;
     }
 
+    // used when an item is dropped from the inventory, overrides whatever the prefab had set
+    public void Initialise(ItemDefinition newItem, int newQuantity)
+    {
+        item = newItem;
+        quantity = Mathf.Max(1, newQuantity);
+    }
+
     private void OnTriggerEnter(Collider other)
     {
         // GetComponentInParent allows this to still work if the player collider is on a child object
@@ -30,9 +37,12 @@ public class ItemPickup : MonoBehaviour
 
         int leftover = holder.Inventory.Add(item, quantity);
 
+        // everything was picked up
         if (leftover == 0)
-            Destroy(gameObject);   // everything was picked up
+            Destroy(gameObject);
+
+        // inventory full, keep whatever did not fit
         else
-            quantity = leftover;    // inventory full, no pickup
+            quantity = leftover;
     }
 }
