@@ -45,11 +45,18 @@ public class InventoryHolder : MonoBehaviour
     // full save path, path combine to add each folder seperator
     private string SavePath => Path.Combine(Application.persistentDataPath, saveFileName);
 
-    // drop the whole stack in a slot into the world in front of the player
+    // drop the whole stack into the world in front of the player
     // returns false if nothing was dropped
-    public bool DropSlot(int index)
+    public bool DropSlot(int index) => DropFromInventory(Inventory, index);
+
+    // same as DropSlot but works for any inventory, like chests
+    // still land in front of the player
+    public bool DropFromInventory(Inventory source, int index)
     {
-        ItemStack stack = Inventory.GetSlot(index);
+        if (source == null)
+            return false;
+
+        ItemStack stack = source.GetSlot(index);
         if (stack == null)
             return false;
 
@@ -77,7 +84,7 @@ public class InventoryHolder : MonoBehaviour
         }
 
         // remove from inventory only once the pickup definitely exists, so items are never lost
-        int removed = Inventory.RemoveFromSlot(index, stack.Quantity);
+        int removed = source.RemoveFromSlot(index, stack.Quantity);
         pickup.Initialise(item, removed);
         return true;
     }

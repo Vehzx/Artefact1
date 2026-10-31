@@ -83,22 +83,31 @@ public class Inventory
         return removed;
     }
 
-    public void MoveOrSwap(int from, int to)
+    // rearrange slots inside this inventory
+    public void MoveOrSwap(int from, int to) => Move(this, from, this, to);
+
+    public static void Move(Inventory fromInventory, int from, Inventory toInventory, int to)
     {
-        ItemStack source = GetSlot(from);
-        ItemStack target = GetSlot(to);
+        if (fromInventory == null)
+            throw new ArgumentNullException(nameof(fromInventory));
+        if (toInventory == null)
+            throw new ArgumentNullException(nameof(toInventory));
+
+        ItemStack source = fromInventory.GetSlot(from);
+        ItemStack target = toInventory.GetSlot(to);
+        bool sameInventory = fromInventory == toInventory;
 
         // since world isnt frozen while inventory open, the source
         // could have been emptied mid drag, just ignore it
         // (FIXES source.Quantity throwing null reference)
-        if (from == to || source == null)
+        if ((sameInventory && from == to) || source == null)
             return;
 
         // the target slot is empty, move items and empty the source slot
         if (target == null)
         {
-            slots[to] = source;
-            slots[from] = null;
+            toInventory.slots[to] = source;
+            fromInventory.slots[from] = null;
         }
 
         // if slot has same item and its stackable, merge until max stack, leave remainder on source slot
@@ -109,17 +118,20 @@ public class Inventory
             source.Quantity -= moved;
 
             if (source.Quantity == 0)
-                slots[from] = null;
+                fromInventory.slots[from] = null;
         }
 
         // if a different item, or a full stack of the same item, simply swap the two slots
         else
         {
-            slots[to] = source;
-            slots[from] = target;
+            toInventory.slots[to] = source;
+            fromInventory.slots[from] = target;
         }
 
-        Changed?.Invoke();
+        // both inventories changed, so both UIs need to redraw
+        fromInventory.Changed?.Invoke();
+        if (!sameInventory)
+            toInventory.Changed?.Invoke();
     }
 
     // total number of a given item across all slots
@@ -140,7 +152,7 @@ public class Inventory
         Changed?.Invoke();
     }
 
-    // conver to plain text so json utility can write it
+    // convert to plain text so json utility can write it
     public InventorySaveData ToSaveData()
     {
         var data = new InventorySaveData();
@@ -184,7 +196,7 @@ public class Inventory
                 continue;
             }
 
-            // Never trust a save file to respect the stack limit.
+            // never trust the save file to respect the stack limit. never again..
             int quantity = Math.Min(saved.quantity, item.MaxStack);
             slots[saved.index] = new ItemStack(item, quantity);
         }

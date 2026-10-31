@@ -8,6 +8,11 @@ using UnityEngine.InputSystem;
 public class InventoryToggle : MonoBehaviour
 {
     [SerializeField] private GameObject inventoryPanel;
+
+    // second panel shown next to the player's inventory when a chest is opened
+    [SerializeField] private GameObject containerPanel;
+    [SerializeField] private InventoryUI containerUI;
+
     [SerializeField] private PlayerInput playerInput;
     [SerializeField] private StarterAssetsInputs starterInputs;
 
@@ -19,7 +24,11 @@ public class InventoryToggle : MonoBehaviour
 
     private InputAction toggleAction;
 
+    // chest currently being shown, null when the inventory was opened with the toggle key
+    private Chest openChest;
+
     public bool IsOpen { get; private set; }
+    public Chest OpenChest => openChest;
 
     private void Reset()
     {
@@ -59,10 +68,55 @@ public class InventoryToggle : MonoBehaviour
 
     private void OnTogglePerformed(InputAction.CallbackContext context) => SetOpen(!IsOpen);
 
+    // opens the player inventory with a chest's inventory beside it
+    public void OpenContainer(Chest chest)
+    {
+        if (chest == null)
+            return;
+
+        if (containerPanel == null || containerUI == null)
+        {
+            Debug.LogError("Container panel or container UI is not assigned, cannot open chests", this);
+            return;
+        }
+
+        // already showing something, close it first so the old chest is told it closed
+        if (IsOpen)
+            SetOpen(false);
+
+        openChest = chest;
+
+        // bind before the panel turns on, so it builds the right number of slots
+        containerUI.Bind(chest.Inventory);
+        chest.NotifyOpened(this);
+        SetOpen(true);
+    }
+
+    // called by a chest that is destroyed or disabled while open
+    public void CloseContainer(Chest chest)
+    {
+        if (chest != null && chest == openChest)
+            SetOpen(false);
+    }
+
     public void SetOpen(bool open)
     {
         IsOpen = open;
-        inventoryPanel.SetActive(open);
+
+        if (inventoryPanel != null)
+            inventoryPanel.SetActive(open);
+
+        // chest panel only shows when the inventory was opened from a chest
+        if (containerPanel != null)
+            containerPanel.SetActive(open && openChest != null);
+
+        // closing, tell the chest so it can play its close animation / sound
+        if (!open && openChest != null)
+        {
+            Chest closed = openChest;
+            openChest = null;
+            closed.NotifyClosed();
+        }
 
         // stop the actions firing, then clear whatever they last wrote
         // without clearing, the player keeps running if W was held when the inventory opened

@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
-using UnityEngine.UI;
 
+// draws one inventory as a grid of slots
 public class InventoryUI : MonoBehaviour
 {
     [SerializeField] private InventoryHolder holder;
@@ -15,53 +15,76 @@ public class InventoryUI : MonoBehaviour
     */
     [SerializeField] private Transform slotContainer;
 
-    // icon that follows the cursor while dragging
-    [SerializeField] private Image dragGhost;
+    // shared by every inventory panel so items can be dragged between them
+    [SerializeField] private InventoryDragController dragController;
 
     private readonly List<SlotUI> slotViews = new List<SlotUI>();
 
+    // the inventory this panel shows
+    private Inventory inventory;
+
+    // the inventory this panel is currently listening to
     private Inventory subscribedInventory;
-    private RectTransform canvasRect;
 
-    // -1 when nothing is being dragged
-    private int dragFromIndex = -1;
-    private bool dropHandled;
-
-    public bool IsDragging => dragFromIndex >= 0;
+    public Inventory Inventory => inventory;
 
     private void OnEnable()
     {
         // safety check to not throw null references
-        if (holder == null || slotPrefab == null || slotContainer == null || dragGhost == null)
+        if (slotPrefab == null || slotContainer == null || dragController == null)
         {
-            Debug.LogError("Holder, slot prefab, slot container or drag ghost is not assigned", this);
+            Debug.LogError("Slot prefab, slot container or drag controller is not assigned", this);
             enabled = false;
             return;
         }
 
-        Canvas canvas = GetComponentInParent<Canvas>();
-        canvasRect = (RectTransform)canvas.rootCanvas.transform;
+        if (inventory == null && holder != null)
+            inventory = holder.Inventory;
 
-        // ghost must never block raycasts, otherwise OnDrop hits the ghost instead of the slot
-        dragGhost.raycastTarget = false;
-        dragGhost.gameObject.SetActive(false);
-
-        // only build the slots the first time
-        if (slotViews.Count == 0)
-            BuildSlots();
-
-        subscribedInventory = holder.Inventory;
-        subscribedInventory.Changed += Refresh;
-        Refresh();
+        Subscribe();
     }
 
     // MUST ALWAYS UNSUBSCRIBE! otherwise inventory keeps
     // reference to UI after destroyed and keeps calling it
     private void OnDisable()
     {
-        // inventory closed mid drag, put everything back
-        CancelDrag();
+        // panel closed mid drag, put everything back
+        if (dragController != null)
+            dragController.CancelDrag();
 
+        Unsubscribe();
+    }
+
+    // point this panel at a different inventory
+    public void Bind(Inventory newInventory)
+    {
+        if (newInventory == inventory)
+            return;
+
+        Unsubscribe();
+        inventory = newInventory;
+
+        if (isActiveAndEnabled)
+            Subscribe();
+    }
+
+    private void Subscribe()
+    {
+        if (inventory == null)
+        {
+            BuildSlots(0);
+            return;
+        }
+
+        BuildSlots(inventory.Capacity);
+
+        subscribedInventory = inventory;
+        subscribedInventory.Changed += Refresh;
+        Refresh();
+    }
+
+    private void Unsubscribe()
+    {
         if (subscribedInventory != null)
         {
             subscribedInventory.Changed -= Refresh;
@@ -69,10 +92,22 @@ public class InventoryUI : MonoBehaviour
         }
     }
 
-    // creates one slot for every inventory slot
-    private void BuildSlots()
+    // makes sure there is exactly one slot view per inventory slot
+    // chests can be different sizes, so slots are rebuilt when the size changes
+    private void BuildSlots(int count)
     {
-        for (int i = 0; i < holder.Inventory.Capacity; i++)
+        if (slotViews.Count == count)
+            return;
+
+        foreach (SlotUI old in slotViews)
+        {
+            // hide first, Destroy only happens at the end of the frame
+            old.gameObject.SetActive(false);
+            Destroy(old.gameObject);
+        }
+        slotViews.Clear();
+
+        for (int i = 0; i < count; i++)
         {
             SlotUI view = Instantiate(slotPrefab, slotContainer);
             view.name = $"Slot {i}";
@@ -84,89 +119,26 @@ public class InventoryUI : MonoBehaviour
     // when inventory changes, redraw every slot from its current contents
     private void Refresh()
     {
+        if (inventory == null)
+            return;
+
         for (int i = 0; i < slotViews.Count; i++)
-            slotViews[i].Show(holder.Inventory.GetSlot(i));
+            slotViews[i].Show(inventory.GetSlot(i));
     }
 
-    public void BeginDrag(int index, PointerEventData eventData)
+    // fade for one slot icon, called by drag controller
+    public void SetSlotDragSource(int index, bool isSource)
     {
-        // nothing in slot
-        ItemStack stack = holder.Inventory.GetSlot(index);
-        if (stack == null)
-            return;
-
-        // remember the slot the drag starts from
-        dragFromIndex = index;
-        dropHandled = false;
-
-        dragGhost.sprite = stack.Item.Icon;
-        dragGhost.gameObject.SetActive(true);
-
-        // draw on top of everything else in its parent
-        dragGhost.transform.SetAsLastSibling();
-
-        // fade icon to see what slot drag starts from
-        slotViews[index].SetDragSource(true);
-
-        // snap to cursor instantly (fixes ghost suddenly teleporting to cursor)
-        MoveGhost(eventData);
+        if (index >= 0 && index < slotViews.Count)
+            slotViews[index].SetDragSource(isSource);
     }
 
-    public void UpdateDrag(PointerEventData eventData)
-    {
-        if (IsDragging)
-            MoveGhost(eventData);
-    }
+    // forward for drag events
+    public void BeginDrag(int index, PointerEventData eventData) => dragController.BeginDrag(this, index, eventData);
 
-    // a slot received the drop
-    public void DropOnSlot(int targetIndex)
-    {
-        if (!IsDragging)
-            return;
+    public void UpdateDrag(PointerEventData eventData) => dragController.UpdateDrag(eventData);
 
-        dropHandled = true;
-        holder.Inventory.MoveOrSwap(dragFromIndex, targetIndex);
-    }
+    public void DropOnSlot(int targetIndex) => dragController.DropOn(this, targetIndex);
 
-    // drag finished, runs after DropOnSlot if there was one
-    public void EndDrag(PointerEventData eventData)
-    {
-        if (!IsDragging)
-            return;
-
-        int from = dragFromIndex;
-        bool handled = dropHandled;
-
-        // releasing over the panel background cancels the drag
-        bool releasedOverUI = eventData.pointerCurrentRaycast.gameObject != null;
-
-        CancelDrag();
-
-        if (!handled && !releasedOverUI)
-            holder.DropSlot(from);
-    }
-
-    private void CancelDrag()
-    {
-        if (!IsDragging)
-            return;
-
-        slotViews[dragFromIndex].SetDragSource(false);
-        dragGhost.gameObject.SetActive(false);
-        dragFromIndex = -1;
-        dropHandled = false;
-    }
-
-    // works for both render modes, screen space overlay and camera
-    /*
-    DOCS: https://docs.unity3d.com/Packages/com.unity.ugui@2.0/api/UnityEngine.RectTransformUtility.html
-    */
-    private void MoveGhost(PointerEventData eventData)
-    {
-        if (RectTransformUtility.ScreenPointToWorldPointInRectangle(
-                canvasRect, eventData.position, eventData.pressEventCamera, out Vector3 worldPoint))
-        {
-            dragGhost.rectTransform.position = worldPoint;
-        }
-    }
+    public void EndDrag(PointerEventData eventData) => dragController.EndDrag(eventData);
 }
