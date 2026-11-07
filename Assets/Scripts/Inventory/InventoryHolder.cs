@@ -29,7 +29,14 @@ public class InventoryHolder : MonoBehaviour
     // what counts as a wall for the drop check
     [SerializeField] private LayerMask dropBlockingLayers = ~0;
 
+    // text shown to the player when a wall stops the drop
+    [SerializeField] private string dropBlockedMessage = "You cannot drop that here";
+
     private Inventory inventory;
+
+    // when a drop is refused because of a wall, fire
+    // UI listens to this, so the holder never needs to know the UI exists
+    public event Action<string> DropBlocked;
 
     // do not create in awake, this avoids the UI finding null inventory sometimes
     public Inventory Inventory
@@ -68,9 +75,10 @@ public class InventoryHolder : MonoBehaviour
             return false;
         }
 
+        // wall in the way, tell listeners
         if (!TryGetDropPosition(out Vector3 position))
         {
-            Debug.Log("No room to drop item here");
+            DropBlocked?.Invoke(dropBlockedMessage);
             return false;
         }
 
